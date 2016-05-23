@@ -1,4 +1,4 @@
-local ENTITY = FindMetaTable("Entity")
+local _R = debug.getregistry()
 util.AddNetworkString( "GS-GCompute-Speed" )
 
 local function AddPos( ent, interval, iterations )
@@ -7,45 +7,52 @@ local function AddPos( ent, interval, iterations )
 		return
 	end
 	
+	-- Add position and engine velocity
 	ent.gs_PosTable[ ent.gs_iSpeedIterations ] = { Pos = ent:GetPos(), Vel = ent:GetVelocity() }
-	ent.gs_iSpeedIterations = ent.gs_iSpeedIterations + 1
 	
-	if ( ent.gs_iSpeedIterations > iterations ) then
-		ent:FinishSpeedCalc()
+	-- We're done; send it to the client
+	if ( ent.gs_iSpeedIterations == iterations ) then
+		FinishCalc( ent )
 	else
+		ent.gs_iSpeedIterations = ent.gs_iSpeedIterations + 1
+		
+		-- Wait for the next point
 		timer.Simple( interval, function()
-			AddPos( ent, interval, iterations ) -- Pretty sure this could cause a stack overflow
+			AddPos( ent, interval, iterations )
 		end )
 	end
 end
 
-function ENTITY:StartSpeedCalc( interval, iterations )
-	interval = interval or 1
+function _R.Entity:SetupPositionTracker( interval, iterations )
+	interval = interval or 1 -- Default 1 second
 	
 	self.gs_PosTable = { interval = interval }
 	self.gs_iSpeedIterations = 1
 	
-	AddPos( self, interval, iterations )
+	AddPos( self, interval, iterations or 10 ) -- Default 10 points
 end
 
+-- More precise than WriteVector, which uses floats
 function net.WriteDoubleVector( vec )
 	net.WriteDouble( vec.x )
 	net.WriteDouble( vec.y )
 	net.WriteDouble( vec.z )
 end
 
+-- Everyone gets the data packs by default
 function player.GetGraphViewers()
 	return player.GetAll()
 end
 
-function ENTITY:FinishSpeedCalc()
+local function FinishCalc( ent )
+	-- Send our data to the client to draw the graphs
 	net.Start( "GS-GCompute-Speed" )
-		net.WriteFloat( self.gs_PosTable.interval )
-		net.WriteUInt( #self.gs_PosTable, 8 )
+		net.WriteFloat( ent.gs_PosTable.interval ) -- For the horizontal axis
+		net.WriteUInt( ent.gs_iSpeedIterations, 8 ) -- How many points do we have?
 		
-		for i = 1, #self.gs_PosTable do
-			net.WriteDoubleVector( self.gs_PosTable[i].Pos )
-			net.WriteDoubleVector( self.gs_PosTable[i].Vel )
+		for i = 1, ent.gs_iSpeedIterations do
+			net.WriteDoubleVector( ent.gs_PosTable[i].Pos )
+			net.WriteDoubleVector( ent.gs_PosTable[i].Vel )
 		end
 	net.Send( player.GetGraphViewers() )
 end
